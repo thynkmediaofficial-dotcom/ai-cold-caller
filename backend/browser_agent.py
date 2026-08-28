@@ -11,10 +11,7 @@ import websockets
 from dotenv import load_dotenv
 
 from google import genai
-from google.genai.types import (
-    HttpOptions,
-    GenerateContentConfig,
-)
+from google.genai.types import GenerateContentConfig,
 
 from cartesia import AsyncCartesia
 
@@ -55,14 +52,11 @@ SILENCE_TIMEOUT = 30
 # GEMINI
 # ==================================================
 
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
 gemini = genai.Client(
-    vertexai=True,
-    project="minutt-maps-501410",
-    location="us-central1",
-    http_options=HttpOptions(
-        api_version="v1"
-    ),
-)
+    api_key=GEMINI_API_KEY
+),
 
 
 # ==================================================
