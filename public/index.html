@@ -719,7 +719,7 @@ window.officeAmbience.volume = 0.18;
 
 start.onclick = async () => {
   try {
-    const response = await fetch("http://127.0.0.1:8000/start");
+    const response = await fetch("https://ai-voice-backend-325064215906.asia-south1.run.app/start");
 
     if (!response.ok) {
       throw new Error("Backend is not running");
@@ -736,9 +736,9 @@ start.onclick = async () => {
     });
 
     // Connect to Jacqueline
-    const ws = new WebSocket(
-      "ws://127.0.0.1:8000/ws"
-    );
+   const ws = new WebSocket(
+    "wss://ai-voice-backend-325064215906.asia-south1.run.app/ws"
+);
 
     ws.binaryType = "arraybuffer";
 
