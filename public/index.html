@@ -612,6 +612,7 @@
     let running = false;
 
     window.jacquelineAudioSources = [];
+    window.jacquelineAudioGeneration = 0;
 
 // ==========================================
 // OFFICE AMBIENCE
@@ -785,6 +786,8 @@ ws.onopen = async () => {
       if (data.type === "assistant_interrupt") {
 
   console.log("🛑 Stopping Jacqueline audio");
+  window.jacquelineAudioGeneration =
+  data.generation;
 
   if (window.jacquelineFinishTimer) {
     clearTimeout(window.jacquelineFinishTimer);
@@ -822,14 +825,20 @@ ws.onopen = async () => {
 
       }
 
+      if (data.type === "filler_start") {
+
+  window.jacquelineAudioGeneration =
+    data.generation;
+
+  return;
+}
+
 if (data.type === "assistant_text") {
 
   message.innerHTML =
     "<b>Jacqueline:</b> " + data.text;
 
   window.jacquelineSpeaking = true;
-
-  window.jacquelineNextPlayTime = 0;
 
   status.textContent =
     "Jacqueline is speaking";
@@ -840,6 +849,13 @@ if (data.type === "assistant_text") {
 
 
 if (data.type === "audio") {
+  
+  if (
+  data.generation !==
+  window.jacquelineAudioGeneration
+) {
+  return;
+}
 
   if (!window.jacquelineAudioContext) {
 
