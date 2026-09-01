@@ -600,6 +600,7 @@ CONVERSATION RULES
     last_final_time = 0.0
 
     last_filler = None
+audio_generation = 0
 
 
     # ==============================================
@@ -619,7 +620,7 @@ CONVERSATION RULES
     # STREAM AUDIO
     # ==============================================
 
-    async def stream_audio(text):
+    async def stream_audio(text, generation):
 
         tts_text = prepare_tts(text)
 
@@ -662,9 +663,13 @@ CONVERSATION RULES
 
                 async for response in ctx.receive():
 
-                    if stop_event.is_set():
+                    if (
+    stop_event.is_set()
+    or generation != audio_generation
+):
+    break
 
-                        break
+                        
 
 
                     if (
@@ -680,12 +685,16 @@ CONVERSATION RULES
                         )
 
 
-                        await websocket.send_json({
-                            "type": "audio",
-                            "data": encoded,
-                            "sample_rate":
-                            TTS_SAMPLE_RATE
-                        })
+                        if generation != audio_generation:
+    break
+
+await websocket.send_json({
+    "type": "audio",
+    "data": encoded,
+    "sample_rate":
+    TTS_SAMPLE_RATE,
+    "generation": generation
+})
 
 
                     elif response.type == "error":
@@ -729,10 +738,12 @@ CONVERSATION RULES
     async def stop_speaking():
 
         nonlocal speaking_task
-        nonlocal assistant_active
+nonlocal assistant_active
+nonlocal audio_generation
 
 
-        stop_event.set()
+audio_generation += 1
+stop_event.set()
 
 
         if (
@@ -758,9 +769,9 @@ CONVERSATION RULES
         try:
 
             await websocket.send_json({
-                "type":
-                "assistant_interrupt"
-            })
+    "type": "assistant_interrupt",
+    "generation": audio_generation
+})
 
         except Exception:
 
@@ -789,12 +800,21 @@ CONVERSATION RULES
 
         stop_event.clear()
 
-        assistant_active = True
+assistant_active = True
 
+generation = audio_generation
 
-        filler_task = asyncio.create_task(
-            stream_audio(filler)
-        )
+generation = audio_generation
+
+await websocket.send_json({
+    "type": "assistant_text",
+    "text": reply,
+    "generation": generation
+})
+
+filler_task = asyncio.create_task(
+    stream_audio(filler, generation)
+)
 
 
         speaking_task = filler_task
@@ -846,7 +866,7 @@ CONVERSATION RULES
 
             try:
 
-                await stream_audio(reply)
+                await stream_audio(reply, generation)
 
             except asyncio.CancelledError:
 
@@ -1028,11 +1048,16 @@ CONVERSATION RULES
                     pass
 
 
-            await end_call(
-                "caller said goodbye"
-            )
+            call_active = False
 
-            return
+print("📞 Ending call: caller said goodbye")
+
+try:
+    await websocket.close()
+except Exception:
+    pass
+
+return
 
 
         # ==========================================
