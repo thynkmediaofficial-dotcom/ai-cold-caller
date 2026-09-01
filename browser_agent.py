@@ -600,7 +600,7 @@ CONVERSATION RULES
     last_final_time = 0.0
 
     last_filler = None
-audio_generation = 0
+    audio_generation = 0
 
 
     # ==============================================
@@ -627,56 +627,41 @@ audio_generation = 0
         if not tts_text:
             return
 
-
         try:
-
             async with (
                 cartesia.tts.websocket_connect()
                 as cartesia_ws
             ):
-
                 ctx = cartesia_ws.context(
                     model_id="sonic-3",
-
                     voice={
                         "mode": "id",
                         "id": VOICE_ID,
                     },
-
                     output_format={
                         "container": "raw",
                         "encoding": "pcm_f32le",
                         "sample_rate": TTS_SAMPLE_RATE,
                     },
-
                     language="en",
                 )
 
-
                 await ctx.push(
-                    '<speed ratio="0.82"/> '
-                    + tts_text
+                    '<speed ratio="0.82"/> ' + tts_text
                 )
-
                 await ctx.no_more_inputs()
 
-
                 async for response in ctx.receive():
-
                     if (
-    stop_event.is_set()
-    or generation != audio_generation
-):
-    break
-
-                        
-
+                        stop_event.is_set()
+                        or generation != audio_generation
+                    ):
+                        break
 
                     if (
                         response.type == "chunk"
                         and response.audio
                     ):
-
                         encoded = (
                             base64.b64encode(
                                 response.audio
@@ -684,21 +669,14 @@ audio_generation = 0
                             .decode("utf-8")
                         )
 
-
-                        if generation != audio_generation:
-    break
-
-await websocket.send_json({
-    "type": "audio",
-    "data": encoded,
-    "sample_rate":
-    TTS_SAMPLE_RATE,
-    "generation": generation
-})
-
+                        await websocket.send_json({
+                            "type": "audio",
+                            "data": encoded,
+                            "sample_rate": TTS_SAMPLE_RATE,
+                            "generation": generation,
+                        })
 
                     elif response.type == "error":
-
                         print(
                             "❌ Cartesia error:",
                             getattr(
@@ -707,24 +685,16 @@ await websocket.send_json({
                                 "Unknown error"
                             )
                         )
-
                         break
-
 
                     elif response.done:
-
                         break
 
-
         except asyncio.CancelledError:
-
             raise
 
-
         except Exception as e:
-
             if not stop_event.is_set():
-
                 print(
                     "❌ Cartesia error:",
                     e
@@ -738,50 +708,35 @@ await websocket.send_json({
     async def stop_speaking():
 
         nonlocal speaking_task
-nonlocal assistant_active
-nonlocal audio_generation
+        nonlocal assistant_active
+        nonlocal audio_generation
 
-
-audio_generation += 1
-stop_event.set()
-
+        audio_generation += 1
+        stop_event.set()
 
         if (
             speaking_task is not None
             and not speaking_task.done()
         ):
-
             speaking_task.cancel()
 
             try:
-
                 await speaking_task
-
             except asyncio.CancelledError:
-
                 pass
-
             except Exception:
-
                 pass
-
 
         try:
-
             await websocket.send_json({
-    "type": "assistant_interrupt",
-    "generation": audio_generation
-})
-
+                "type": "assistant_interrupt",
+                "generation": audio_generation,
+            })
         except Exception:
-
             pass
 
-
         speaking_task = None
-
         assistant_active = False
-
         stop_event.clear()
 
 
@@ -797,43 +752,28 @@ stop_event.set()
         nonlocal speaking_task
         nonlocal assistant_active
 
-
         stop_event.clear()
+        assistant_active = True
 
-assistant_active = True
+        generation = audio_generation
 
-generation = audio_generation
+        await websocket.send_json({
+            "type": "assistant_text",
+            "text": filler,
+            "generation": generation,
+        })
 
-generation = audio_generation
-
-await websocket.send_json({
-    "type": "assistant_text",
-    "text": reply,
-    "generation": generation
-})
-
-filler_task = asyncio.create_task(
-    stream_audio(filler, generation)
-)
-
+        filler_task = asyncio.create_task(
+            stream_audio(filler, generation)
+        )
 
         speaking_task = filler_task
-
 
         return filler_task
 
 
     # ==============================================
     # SPEAK REAL RESPONSE
-    #
-    # IMPORTANT:
-    #
-    # We do NOT call stop_speaking() here when the
-    # filler has already finished naturally.
-    #
-    # That prevents assistant_interrupt from clearing
-    # the filler audio that the browser may still have
-    # queued for playback.
     # ==============================================
 
     async def speak_reply(reply):
@@ -842,59 +782,42 @@ filler_task = asyncio.create_task(
         nonlocal assistant_active
         nonlocal last_user_activity
 
-
         stop_event.clear()
-
         assistant_active = True
 
+        generation = audio_generation
 
         await websocket.send_json({
             "type": "assistant_text",
-            "text": reply
+            "text": reply,
+            "generation": generation,
         })
-
 
         await websocket.send_json({
             "type": "assistant_start"
         })
 
-
         async def run_tts():
-
             nonlocal assistant_active
             nonlocal last_user_activity
 
             try:
-
                 await stream_audio(reply, generation)
-
             except asyncio.CancelledError:
-
                 raise
-
             finally:
-
                 if not stop_event.is_set():
-
                     try:
-
                         await websocket.send_json({
-                            "type":
-                            "assistant_end"
+                            "type": "assistant_end"
                         })
-
                     except Exception:
-
                         pass
-
 
                     last_user_activity = (
                         asyncio.get_running_loop().time()
                     )
-
-
                     assistant_active = False
-
 
         speaking_task = asyncio.create_task(
             run_tts()
@@ -997,67 +920,55 @@ filler_task = asyncio.create_task(
         nonlocal last_filler
         nonlocal speaking_task
         nonlocal assistant_active
-
+        nonlocal call_active
 
         if not text:
             return
 
-
         last_user_activity = (
             asyncio.get_running_loop().time()
         )
-
 
         print(
             "\n👤 USER:",
             text
         )
 
-
         await websocket.send_json({
             "type": "user_text",
             "text": text
         })
-
 
         # ==========================================
         # GOODBYE
         # ==========================================
 
         if is_goodbye(text):
-
             goodbye_message = (
                 "Thanks for calling SmileBright Dental Clinic. "
                 "Have a great day!"
             )
 
-
             await speak_reply(
                 goodbye_message
             )
 
-
             if speaking_task is not None:
-
                 try:
-
                     await speaking_task
-
                 except asyncio.CancelledError:
-
                     pass
-
 
             call_active = False
 
-print("📞 Ending call: caller said goodbye")
+            print("📞 Ending call: caller said goodbye")
 
-try:
-    await websocket.close()
-except Exception:
-    pass
+            try:
+                await websocket.close()
+            except Exception:
+                pass
 
-return
+            return
 
 
         # ==========================================
