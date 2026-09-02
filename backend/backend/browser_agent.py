@@ -2,6 +2,7 @@ import os
 import json
 import base64
 import asyncio
+import random
 import re
 import time
 
@@ -68,7 +69,51 @@ cartesia = AsyncCartesia(
 
 
 # ==================================================
+# FILLER PHRASES
+# ==================================================
 
+GENERAL_FILLERS = [
+    "Okay.",
+    "Hmm.",
+    "Uh-huh.",
+    "Ah, okay.",
+    "I see.",
+    "Got it.",
+    "Alright.",
+    "Hmm, okay.",
+    "Ah, got it.",
+    "Okay, I understand.",
+    "Right, got it.",
+]
+
+APPOINTMENT_FILLERS = [
+    "Okay.",
+    "Hmm, sure.",
+    "Ah, okay.",
+    "Alright.",
+    "Okay, got it.",
+]
+
+PRICE_INSURANCE_FILLERS = [
+    "Hmm.",
+    "Ah, okay.",
+    "Let me see.",
+    "Hmm, okay.",
+]
+
+CLINIC_INFO_FILLERS = [
+    "Oh, okay.",
+    "Hmm.",
+    "Alright.",
+    "Okay.",
+]
+
+SERVICE_FILLERS = [
+    "Ah, sure.",
+    "Hmm, okay.",
+    "Oh, got it.",
+    "Alright.",
+]
 
 
 # ==================================================
@@ -100,7 +145,93 @@ def prepare_tts(text):
 # SMART FILLER SELECTION
 # ==================================================
 
+def choose_filler(text, previous_filler=None):
 
+    normalized = text.lower().strip()
+
+    phrases = GENERAL_FILLERS
+
+
+    if any(
+        word in normalized
+        for word in [
+            "appointment",
+            "book",
+            "booking",
+            "schedule",
+            "reschedule",
+            "cancel",
+            "date",
+            "time",
+        ]
+    ):
+
+        phrases = APPOINTMENT_FILLERS
+
+
+    elif any(
+        word in normalized
+        for word in [
+            "price",
+            "cost",
+            "insurance",
+            "payment",
+            "emi",
+            "pay",
+            "coverage",
+        ]
+    ):
+
+        phrases = PRICE_INSURANCE_FILLERS
+
+
+    elif any(
+        word in normalized
+        for word in [
+            "hour",
+            "open",
+            "close",
+            "closed",
+            "timing",
+            "monday",
+            "sunday",
+            "saturday",
+        ]
+    ):
+
+        phrases = CLINIC_INFO_FILLERS
+
+
+    elif any(
+        word in normalized
+        for word in [
+            "cleaning",
+            "filling",
+            "crown",
+            "root canal",
+            "whitening",
+            "braces",
+            "orthodont",
+            "extraction",
+            "tooth",
+            "teeth",
+            "dentist",
+        ]
+    ):
+
+        phrases = SERVICE_FILLERS
+
+
+    available = [
+        phrase
+        for phrase in phrases
+        if phrase != previous_filler
+    ]
+
+    if not available:
+        available = phrases
+
+    return random.choice(available)
 
 
 # ==================================================
@@ -177,7 +308,7 @@ async def handle_browser(websocket):
     # ==============================================
 
     conversation = gemini.aio.chats.create(
-        model="gemini-3.5-flash-lite",
+        model="gemini-3.5-flash-lite"
 
         config=GenerateContentConfig(
             temperature=0.35,
@@ -468,8 +599,7 @@ CONVERSATION RULES
     last_final_text = ""
     last_final_time = 0.0
 
-    
-    audio_generation = 0
+    last_filler = None
 
 
     # ==============================================
@@ -489,48 +619,59 @@ CONVERSATION RULES
     # STREAM AUDIO
     # ==============================================
 
-    async def stream_audio(text, generation):
+    async def stream_audio(text):
 
         tts_text = prepare_tts(text)
 
         if not tts_text:
             return
 
+
         try:
+
             async with (
                 cartesia.tts.websocket_connect()
                 as cartesia_ws
             ):
+
                 ctx = cartesia_ws.context(
                     model_id="sonic-3",
+
                     voice={
                         "mode": "id",
                         "id": VOICE_ID,
                     },
+
                     output_format={
                         "container": "raw",
                         "encoding": "pcm_f32le",
                         "sample_rate": TTS_SAMPLE_RATE,
                     },
+
                     language="en",
                 )
 
+
                 await ctx.push(
-                    '<speed ratio="0.82"/> ' + tts_text
+                    '<speed ratio="0.82"/> '
+                    + tts_text
                 )
+
                 await ctx.no_more_inputs()
 
+
                 async for response in ctx.receive():
-                    if (
-                        stop_event.is_set()
-                        or generation != audio_generation
-                    ):
+
+                    if stop_event.is_set():
+
                         break
+
 
                     if (
                         response.type == "chunk"
                         and response.audio
                     ):
+
                         encoded = (
                             base64.b64encode(
                                 response.audio
@@ -538,14 +679,17 @@ CONVERSATION RULES
                             .decode("utf-8")
                         )
 
+
                         await websocket.send_json({
                             "type": "audio",
                             "data": encoded,
-                            "sample_rate": TTS_SAMPLE_RATE,
-                            "generation": generation,
+                            "sample_rate":
+                            TTS_SAMPLE_RATE
                         })
 
+
                     elif response.type == "error":
+
                         print(
                             "❌ Cartesia error:",
                             getattr(
@@ -554,16 +698,24 @@ CONVERSATION RULES
                                 "Unknown error"
                             )
                         )
+
                         break
+
 
                     elif response.done:
+
                         break
 
+
         except asyncio.CancelledError:
+
             raise
 
+
         except Exception as e:
+
             if not stop_event.is_set():
+
                 print(
                     "❌ Cartesia error:",
                     e
@@ -578,34 +730,47 @@ CONVERSATION RULES
 
         nonlocal speaking_task
         nonlocal assistant_active
-        nonlocal audio_generation
 
-        audio_generation += 1
+
         stop_event.set()
+
 
         if (
             speaking_task is not None
             and not speaking_task.done()
         ):
+
             speaking_task.cancel()
 
             try:
+
                 await speaking_task
+
             except asyncio.CancelledError:
+
                 pass
+
             except Exception:
+
                 pass
+
 
         try:
+
             await websocket.send_json({
-                "type": "assistant_interrupt",
-                "generation": audio_generation,
+                "type":
+                "assistant_interrupt"
             })
+
         except Exception:
+
             pass
 
+
         speaking_task = None
+
         assistant_active = False
+
         stop_event.clear()
 
 
@@ -621,28 +786,34 @@ CONVERSATION RULES
         nonlocal speaking_task
         nonlocal assistant_active
 
+
         stop_event.clear()
+
         assistant_active = True
 
-        generation = audio_generation
-
-        await websocket.send_json({
-            "type": "assistant_text",
-            "text": filler,
-            "generation": generation,
-        })
 
         filler_task = asyncio.create_task(
-            stream_audio(filler, generation)
+            stream_audio(filler)
         )
 
+
         speaking_task = filler_task
+
 
         return filler_task
 
 
     # ==============================================
     # SPEAK REAL RESPONSE
+    #
+    # IMPORTANT:
+    #
+    # We do NOT call stop_speaking() here when the
+    # filler has already finished naturally.
+    #
+    # That prevents assistant_interrupt from clearing
+    # the filler audio that the browser may still have
+    # queued for playback.
     # ==============================================
 
     async def speak_reply(reply):
@@ -651,42 +822,59 @@ CONVERSATION RULES
         nonlocal assistant_active
         nonlocal last_user_activity
 
+
         stop_event.clear()
+
         assistant_active = True
 
-        generation = audio_generation
 
         await websocket.send_json({
             "type": "assistant_text",
-            "text": reply,
-            "generation": generation,
+            "text": reply
         })
+
 
         await websocket.send_json({
             "type": "assistant_start"
         })
 
+
         async def run_tts():
+
             nonlocal assistant_active
             nonlocal last_user_activity
 
             try:
-                await stream_audio(reply, generation)
+
+                await stream_audio(reply)
+
             except asyncio.CancelledError:
+
                 raise
+
             finally:
+
                 if not stop_event.is_set():
+
                     try:
+
                         await websocket.send_json({
-                            "type": "assistant_end"
+                            "type":
+                            "assistant_end"
                         })
+
                     except Exception:
+
                         pass
+
 
                     last_user_activity = (
                         asyncio.get_running_loop().time()
                     )
+
+
                     assistant_active = False
+
 
         speaking_task = asyncio.create_task(
             run_tts()
@@ -786,55 +974,63 @@ CONVERSATION RULES
     async def process_user_text(text):
 
         nonlocal last_user_activity
+        nonlocal last_filler
         nonlocal speaking_task
         nonlocal assistant_active
-        nonlocal call_active
+
 
         if not text:
             return
 
+
         last_user_activity = (
             asyncio.get_running_loop().time()
         )
+
 
         print(
             "\n👤 USER:",
             text
         )
 
+
         await websocket.send_json({
             "type": "user_text",
             "text": text
         })
+
 
         # ==========================================
         # GOODBYE
         # ==========================================
 
         if is_goodbye(text):
+
             goodbye_message = (
                 "Thanks for calling SmileBright Dental Clinic. "
                 "Have a great day!"
             )
 
+
             await speak_reply(
                 goodbye_message
             )
 
+
             if speaking_task is not None:
+
                 try:
+
                     await speaking_task
+
                 except asyncio.CancelledError:
+
                     pass
 
-            call_active = False
 
-            print("📞 Ending call: caller said goodbye")
-
-            try:
-                await websocket.close()
-            except Exception:
-                pass
+            await end_call(
+                "caller said goodbye"
+            )
 
             return
 
@@ -888,14 +1084,27 @@ CONVERSATION RULES
         # CHOOSE FILLER
         # ==========================================
 
-        
+        filler = choose_filler(
+            text,
+            last_filler
+        )
+
+        last_filler = filler
+
+
+        print(
+            "💬 Filler:",
+            filler
+        )
 
 
         # ==========================================
         # START FILLER IMMEDIATELY
         # ==========================================
 
-         
+        filler_task = await start_filler(
+            filler
+        )
 
 
         # ==========================================
@@ -921,7 +1130,6 @@ CONVERSATION RULES
         try:
 
             reply = await gemini_task
-            await speak_reply(reply)
 
 
         except asyncio.CancelledError:
@@ -952,7 +1160,64 @@ CONVERSATION RULES
                 "Could you please say that again?"
             )
 
-            await speak_reply(reply)
+
+        # ==========================================
+        # GUARANTEE THE FILLER FINISHES
+        #
+        # Even if Gemini finished immediately,
+        # wait for the filler task before moving on.
+        # ==========================================
+
+        try:
+
+            if not filler_task.done():
+
+                await filler_task
+
+        except asyncio.CancelledError:
+
+            raise
+
+        except Exception as e:
+
+            print(
+                "⚠️ Filler error:",
+                e
+            )
+
+
+        # ==========================================
+        # FILLER FINISHED NATURALLY
+        #
+        # Do NOT send assistant_interrupt here.
+        #
+        # The browser can continue its queued audio
+        # naturally and then play the real answer.
+        # ==========================================
+
+        if speaking_task is filler_task:
+
+            speaking_task = None
+
+
+        assistant_active = False
+
+
+        print(
+            "🤖 JACQUELINE:",
+            reply
+        )
+
+
+        print(
+            "🔊 Cartesia speaking..."
+        )
+
+
+        await speak_reply(
+            reply
+        )
+
 
     # ==============================================
     # SILENCE MONITOR
